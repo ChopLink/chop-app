@@ -510,15 +510,14 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       let nextCart = cloneCart(serverCartRef.current)
 
       if (pending.clearCartRequested) {
-        if (nextCart.paymentLocked) {
-          if (!pendingPaymentReferenceRef.current) throw new Error('Pending payment reference missing. Open payment page to continue or cancel payment.')
+        if (nextCart.paymentLocked && pendingPaymentReferenceRef.current) {
           await cancelPaymentInBackend(activeToken, pendingPaymentReferenceRef.current)
-          setPendingPaymentReferenceState(null)
         }
 
         nextCart = await deleteCartInBackend(activeToken)
         setServerCart(nextCart)
         setPendingCheckoutCartState(null)
+        setPendingPaymentReferenceState(null)
         if (mutationVersionRef.current === startVersion && !hasPendingMutations()) {
           setBackendCart(nextCart)
           setActiveDishId(null)
