@@ -243,6 +243,12 @@ const PENDING_CHECKOUT_STORAGE_KEY = 'choplink-pending-checkout-v1'
 const PENDING_PAYMENT_REFERENCE_STORAGE_KEY = 'choplink-pending-payment-reference-v1'
 const DEBOUNCE_MS = 1000
 
+type DeferredMutation = {
+  promise: Promise<void>
+  resolve: () => void
+  reject: (error: unknown) => void
+}
+
 const defaultDraft: CartDraft = {
   restaurantId: null,
   dishes: [],
@@ -352,6 +358,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const locationIdRef = useRef(locationId)
   const locationNoteRef = useRef(locationNote)
   const referralCodeRef = useRef(referralCode)
+  const clearCartDeferredRef = useRef<DeferredMutation | null>(null)
 
   useEffect(() => {
     window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(cartDraft))
@@ -460,6 +467,16 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     return pending.clearCartRequested || pending.quantities.size > 0 || pending.addDishes.length > 0 || pending.removeDishIds.size > 0
   }
 
+  const createDeferredMutation = (): DeferredMutation => {
+    let resolve!: () => void
+    let reject!: (error: unknown) => void
+    const promise = new Promise<void>((nextResolve, nextReject) => {
+      resolve = nextResolve
+      reject = nextReject
+    })
+    return { promise, resolve, reject }
+  }
+
   const clearScheduledFlush = () => {
     if (flushTimerRef.current) {
       window.clearTimeout(flushTimerRef.current)
@@ -525,6 +542,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         setLocationIdState(nextCart.locationId ?? '')
         setLocationNoteState(nextCart.locationNote ?? '')
         setReferralCodeState(nextCart.referralCode ?? '')
+        clearCartDeferredRef.current?.resolve()
+        clearCartDeferredRef.current = null
         return
       }
 
@@ -591,10 +610,16 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         setActiveDishId(null)
       }
       pendingMutationsRef.current = createPendingMutations()
+      clearCartDeferredRef.current?.reject(nextError)
+      clearCartDeferredRef.current = null
       throw nextError
     } finally {
       isFlushingRef.current = false
       setSyncing(false)
+      if (!pending.clearCartRequested && clearCartDeferredRef.current) {
+        clearCartDeferredRef.current.resolve()
+        clearCartDeferredRef.current = null
+      }
       if (hasPendingMutations()) scheduleFlush()
     }
   }
@@ -1008,6 +1033,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       return
     }
 
+    const deferred = createDeferredMutation()
+    clearCartDeferredRef.current = deferred
+
     const nextCart = emptyCart()
     setBackendCart(nextCart)
     setActiveDishId(null)
@@ -1015,6 +1043,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     pending.clearCartRequested = true
     pendingMutationsRef.current = pending
     markMutation()
+
+    return deferred.promise
   }
 
   const cart = useMemo(() => (
